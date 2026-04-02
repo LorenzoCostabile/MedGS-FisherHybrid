@@ -121,7 +121,7 @@ class GaussianModel:
         }
 
     def restore(self, model_args, training_args=None, load_optimizer=True):
-=
+
         if isinstance(model_args, (tuple, list)):
             (self.active_sh_degree,
             self._xyz,
