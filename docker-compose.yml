@@ -1,0 +1,23 @@
+services:
+  medgs:
+    image: storiano/fisher-hybrid:cuda12.4 
+    build:
+      context: .
+      args:
+        BASE_IMAGE: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
+        TORCH_CUDA_ARCH_LIST: "${TORCH_CUDA_ARCH_LIST:-6.1;7.0;7.5;8.0;8.6;8.9;9.0}"
+    gpus: all
+    ipc: host
+    shm_size: 8gb
+    stdin_open: true
+    tty: true
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      MPLBACKEND: Agg
+      MPLCONFIGDIR: /tmp/matplotlib
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      TORCH_CUDA_ARCH_LIST: "${TORCH_CUDA_ARCH_LIST:-6.1;7.0;7.5;8.0;8.6;8.9;9.0}"
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
