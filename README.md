@@ -289,15 +289,19 @@ He dejado un script para lanzar las variantes principales:
 
 - `scripts/run_experiment_sparse.sh`
 
-Uso:
+Este script se ejecuta **desde el host** y lanza internamente los comandos `docker compose run --rm --no-build medgs ...`.
+
+Uso recomendado para el profesor:
 
 ```bash
+docker compose pull
 bash scripts/run_experiment_sparse.sh
 ```
 
 Opcionalmente puedes sobreescribir variables:
 
 ```bash
+docker compose pull
 CASE_NAME=014_P3_1_right ITERATIONS=30000 bash scripts/run_experiment_sparse.sh
 ```
 
@@ -314,15 +318,19 @@ He dejado un script para lanzar este experimento:
 
 - `scripts/run_experiment_gap.sh`
 
-Uso:
+Este script se ejecuta **desde el host** y lanza internamente los comandos `docker compose run --rm --no-build medgs ...`.
+
+Uso recomendado para el profesor:
 
 ```bash
+docker compose pull
 bash scripts/run_experiment_gap.sh
 ```
 
 También puedes ajustar el tamaño del hueco:
 
 ```bash
+docker compose pull
 CASE_NAME=014_P3_1_right GAP_START_FRAC=0.4 GAP_END_FRAC=0.6 bash scripts/run_experiment_gap.sh
 ```
 
@@ -332,9 +340,12 @@ He añadido un script para renderizar un modelo entrenado y generar vídeos de i
 
 - `scripts/visualize_result.sh`
 
+Este script se ejecuta **desde el host** y llama internamente a `docker compose run --rm --no-build medgs ...`.
+
 Ejemplo sobre el `baseline full-budget`:
 
 ```bash
+docker compose pull
 bash scripts/visualize_result.sh \
   output/expH_014_P3_1_right_baseline_full \
   data/real_014_P3_1_right_img \
@@ -346,6 +357,7 @@ bash scripts/visualize_result.sh \
 Ejemplo sobre `fisher same-budget` evaluado en el test intocable:
 
 ```bash
+docker compose pull
 bash scripts/visualize_result.sh \
   output/expA_014_P3_1_right_fisher \
   data/real_014_P3_1_right_img \
@@ -357,6 +369,7 @@ bash scripts/visualize_result.sh \
 Ejemplo sobre el experimento de `gap`:
 
 ```bash
+docker compose pull
 GAP_START_FRAC=0.4 GAP_END_FRAC=0.6 \
 bash scripts/visualize_result.sh \
   output/expC_014_P3_1_right_gap20_fisher \
