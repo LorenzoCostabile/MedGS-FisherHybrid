@@ -90,7 +90,7 @@ Si ya existe una imagen publicada en Docker Hub:
 
 ```bash
 docker pull storiano/fisher-hybrid:cuda12.4
-docker compose run --rm --no-build medgs bash
+docker compose run --rm medgs bash
 ```
 
 En este caso:
@@ -143,6 +143,50 @@ Ambas raíces deben tener:
 - el mismo número de frames
 - el mismo indexado
 - carpetas `original/` y `mirror/` compatibles
+
+### Preparación automática desde `images/` y `masks/`
+
+Si el profesor recibe un caso con esta estructura:
+
+```text
+014_P3_1_right/
+├── images/
+│   ├── 0000.png
+│   ├── 0001.png
+│   └── ...
+└── masks/
+    ├── 0000.png
+    ├── 0001.png
+    └── ...
+```
+
+puede convertirlo al formato que espera Fisher-Hybrid con:
+
+```bash
+bash scripts/prepare_case.sh 014_P3_1_right
+```
+
+Eso crea automáticamente:
+
+```text
+data/
+├── real_014_P3_1_right_img/
+│   ├── original/
+│   └── mirror/
+└── real_014_P3_1_right_seg/
+    ├── original/
+    └── mirror/
+```
+
+Por defecto el script usa `symlinks` para no duplicar datos. Si se prefiere copiar físicamente los PNG:
+
+```bash
+MODE=copy bash scripts/prepare_case.sh 014_P3_1_right
+```
+
+Script:
+
+- `scripts/prepare_case.sh`
 
 ## Protocolos de Split
 
@@ -206,7 +250,7 @@ Estos son los tres entrenamientos principales usados en el trabajo.
 Es el baseline heurístico más fuerte.
 
 ```bash
-docker compose run --rm --no-build medgs \
+docker compose run --rm medgs \
   python -u train.py \
   -s data/real_014_P3_1_right_img \
   -m output/expH_014_P3_1_right_baseline_full \
@@ -228,7 +272,7 @@ docker compose run --rm --no-build medgs \
 Usa el mismo subconjunto principal de reconstrucción que Fisher, pero no usa `fisher-val`.
 
 ```bash
-docker compose run --rm --no-build medgs \
+docker compose run --rm medgs \
   python -u train.py \
   -s data/real_014_P3_1_right_img \
   -m output/expA_014_P3_1_right_baseline \
@@ -250,7 +294,7 @@ docker compose run --rm --no-build medgs \
 Es la variante propuesta con control de densidad guiado por Fisher.
 
 ```bash
-docker compose run --rm --no-build medgs \
+docker compose run --rm medgs \
   python -u train.py \
   -s data/real_014_P3_1_right_img \
   -m output/expA_014_P3_1_right_fisher \
@@ -289,7 +333,7 @@ He dejado un script para lanzar las variantes principales:
 
 - `scripts/run_experiment_sparse.sh`
 
-Este script se ejecuta **desde el host** y lanza internamente los comandos `docker compose run --rm --no-build medgs ...`.
+Este script se ejecuta **desde el host** y lanza internamente los comandos `docker compose run --rm medgs ...`.
 
 Uso recomendado para el profesor:
 
@@ -318,7 +362,7 @@ He dejado un script para lanzar este experimento:
 
 - `scripts/run_experiment_gap.sh`
 
-Este script se ejecuta **desde el host** y lanza internamente los comandos `docker compose run --rm --no-build medgs ...`.
+Este script se ejecuta **desde el host** y lanza internamente los comandos `docker compose run --rm medgs ...`.
 
 Uso recomendado para el profesor:
 
@@ -340,7 +384,7 @@ He añadido un script para renderizar un modelo entrenado y generar vídeos de i
 
 - `scripts/visualize_result.sh`
 
-Este script se ejecuta **desde el host** y llama internamente a `docker compose run --rm --no-build medgs ...`.
+Este script se ejecuta **desde el host** y llama internamente a `docker compose run --rm medgs ...`.
 
 Ejemplo sobre el `baseline full-budget`:
 
