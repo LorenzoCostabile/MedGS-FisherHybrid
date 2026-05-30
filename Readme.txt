@@ -9,9 +9,6 @@ https://github.com/LorenzoCostabile/MedGS-FisherHybrid
 Documentacion principal:
 README.md
 
-Enlace directo a la seccion del experimento sparse:
-https://github.com/LorenzoCostabile/MedGS-FisherHybrid#experimento-sparse
-
 
 COMO EMPEZAR
 ============
@@ -22,20 +19,6 @@ COMO EMPEZAR
    Si los datos vienen ya preparados en formato MedGS, deben aparecer carpetas dentro de:
 
    data/
-
-   Si los datos vienen con la estructura:
-
-   <caso>/
-     images/
-     masks/
-
-   se pueden adaptar con:
-
-   bash scripts/prepare_case.sh <ruta_al_caso>
-
-   Ejemplo:
-
-   bash scripts/prepare_case.sh 014_P3_1_right
 
 
 USO RECOMENDADO CON DOCKER
@@ -55,6 +38,8 @@ Opcion recomendada: usar la imagen ya publicada.
 
    docker compose run --rm medgs bash
 
+4. Si todo va bien te dira que no tiene nombre. Sal de la imagen con exit
+
 Nota:
 - La imagen aporta el entorno CUDA/PyTorch.
 - El repositorio se monta por volumen en /workspace.
@@ -73,10 +58,6 @@ Los tres entrenamientos principales descritos en la memoria son:
 Los comandos exactos estan documentados en:
 
 README.md
-
-Secciones recomendadas:
-- "Entrenamientos de Referencia"
-- "Protocolos de Split"
 
 
 EXPERIMENTOS ADICIONALES
@@ -118,12 +99,3 @@ Despues:
 
    docker compose build medgs
 
-
-NOTA FINAL
-==========
-
-Para una explicacion completa del metodo, los splits, los experimentos y los scripts auxiliares, consultar:
-
-- README.md
-- documento/main.pdf
-- documento/results.pdf
