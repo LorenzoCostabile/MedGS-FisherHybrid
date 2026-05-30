@@ -146,7 +146,7 @@ Ambas raíces deben tener:
 
 ### Preparación automática desde `images/` y `masks/`
 
-Si el profesor recibe un caso con esta estructura:
+Si se quiere usar los datos contenidos en el zip de MedGS data que tienen esta estructura:
 
 ```text
 014_P3_1_right/
@@ -160,7 +160,7 @@ Si el profesor recibe un caso con esta estructura:
     └── ...
 ```
 
-puede convertirlo al formato que espera Fisher-Hybrid con:
+pueden adaptarse al formato esperado por Fisher-Hybrid con:
 
 ```bash
 bash scripts/prepare_case.sh 014_P3_1_right
@@ -329,13 +329,13 @@ Regímenes:
 - `x2`: `train_pool_stride=2`
 - `x4`: `train_pool_stride=4`
 
-He dejado un script para lanzar las variantes principales:
+Para lanzar las variantes principales existe el script:
 
 - `scripts/run_experiment_sparse.sh`
 
 Este script se ejecuta **desde el host** y lanza internamente los comandos `docker compose run --rm medgs ...`.
 
-Uso recomendado para el profesor:
+Uso:
 
 ```bash
 docker compose pull
@@ -358,13 +358,13 @@ Parámetros de referencia:
 - `gap_start_frac=0.4`
 - `gap_end_frac=0.6`
 
-He dejado un script para lanzar este experimento:
+Para lanzar este experimento existe el script:
 
 - `scripts/run_experiment_gap.sh`
 
 Este script se ejecuta **desde el host** y lanza internamente los comandos `docker compose run --rm medgs ...`.
 
-Uso recomendado para el profesor:
+Uso:
 
 ```bash
 docker compose pull
