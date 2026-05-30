@@ -57,6 +57,12 @@ class GaussianModel:
         self.time_func = torch.empty(0)
         self.use_dff = use_dff
         self.denom = torch.empty(0)
+        self.m_gradient_accum = torch.empty(0)
+        self.m_denom = torch.empty(0)
+        self.fisher_info_ema = torch.empty(0)
+        self.fisher_uncert_ema = torch.empty(0)
+        self.fisher_low_info_counter = torch.empty(0, dtype=torch.long)
+        self.fisher_state_updates = 0
         self.optimizer = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
@@ -86,6 +92,68 @@ class GaussianModel:
             and self._features_rest_seg.shape[0] == n
         )
 
+    def _ensure_fisher_buffers(self):
+        num_points = self.get_xyz.shape[0]
+        device = self.get_xyz.device
+
+        if not isinstance(self.fisher_info_ema, torch.Tensor) or self.fisher_info_ema.numel() != num_points:
+            self.fisher_info_ema = torch.zeros(num_points, device=device)
+        else:
+            self.fisher_info_ema = self.fisher_info_ema.to(device)
+
+        if not isinstance(self.fisher_uncert_ema, torch.Tensor) or self.fisher_uncert_ema.numel() != num_points:
+            self.fisher_uncert_ema = torch.ones(num_points, device=device)
+        else:
+            self.fisher_uncert_ema = self.fisher_uncert_ema.to(device)
+
+        if (
+            not isinstance(self.fisher_low_info_counter, torch.Tensor)
+            or self.fisher_low_info_counter.numel() != num_points
+        ):
+            self.fisher_low_info_counter = torch.zeros(num_points, device=device, dtype=torch.long)
+        else:
+            self.fisher_low_info_counter = self.fisher_low_info_counter.to(device=device, dtype=torch.long)
+
+        if not isinstance(self.fisher_state_updates, int):
+            self.fisher_state_updates = int(self.fisher_state_updates)
+
+    def has_fisher_state(self) -> bool:
+        return self.fisher_state_updates > 0 and self.fisher_info_ema.numel() == self.get_xyz.shape[0]
+
+    @staticmethod
+    def _normalize_fisher_branch(values: torch.Tensor) -> torch.Tensor:
+        if values.numel() == 0:
+            return values
+        finite_mask = torch.isfinite(values)
+        if not finite_mask.any():
+            return torch.zeros_like(values)
+        denom = torch.quantile(values[finite_mask], 0.95).clamp_min(1e-12)
+        normalized = torch.zeros_like(values)
+        normalized[finite_mask] = torch.clamp(values[finite_mask] / denom, 0.0, 1.0)
+        return normalized
+
+    def update_fisher_state(self, fisher_xyz, fisher_deform, ema_decay, weight_xyz, weight_deform):
+        self._ensure_fisher_buffers()
+        fisher_xyz = fisher_xyz.detach()
+        fisher_deform = fisher_deform.detach()
+
+        xyz_norm = self._normalize_fisher_branch(fisher_xyz)
+        deform_norm = self._normalize_fisher_branch(fisher_deform)
+
+        total_weight = max(weight_xyz + weight_deform, 1e-8)
+        info = ((weight_xyz * xyz_norm) + (weight_deform * deform_norm)) / total_weight
+        info = torch.clamp(info, 0.0, 1.0)
+        uncert = 1.0 - info
+
+        self.fisher_info_ema = ema_decay * self.fisher_info_ema + (1.0 - ema_decay) * info
+        self.fisher_uncert_ema = ema_decay * self.fisher_uncert_ema + (1.0 - ema_decay) * uncert
+        self.fisher_state_updates += 1
+
+        return {
+            "info_mean": float(self.fisher_info_ema.mean().item()),
+            "uncert_mean": float(self.fisher_uncert_ema.mean().item()),
+        }
+
 
     # Checkpointing 
 
@@ -102,6 +170,8 @@ class GaussianModel:
             "max_radii2D": self.max_radii2D,
             "xyz_gradient_accum": self.xyz_gradient_accum,
             "denom": self.denom,
+            "m_gradient_accum": self.m_gradient_accum,
+            "m_denom": self.m_denom,
             "optimizer_state": self.optimizer.state_dict() if self.optimizer is not None else None,
             "spatial_lr_scale": self.spatial_lr_scale,
 
@@ -118,6 +188,10 @@ class GaussianModel:
             "_opacity_seg": self._opacity_seg,
             "_features_dc_seg": self._features_dc_seg,
             "_features_rest_seg": self._features_rest_seg,
+            "fisher_info_ema": self.fisher_info_ema,
+            "fisher_uncert_ema": self.fisher_uncert_ema,
+            "fisher_low_info_counter": self.fisher_low_info_counter,
+            "fisher_state_updates": self.fisher_state_updates,
         }
 
     def restore(self, model_args, training_args=None, load_optimizer=True):
@@ -166,6 +240,8 @@ class GaussianModel:
         self.max_radii2D = model_args["max_radii2D"]
         self.xyz_gradient_accum = model_args["xyz_gradient_accum"]
         self.denom = model_args["denom"]
+        self.m_gradient_accum = model_args.get("m_gradient_accum", torch.zeros_like(self.xyz_gradient_accum))
+        self.m_denom = model_args.get("m_denom", torch.zeros_like(self.xyz_gradient_accum))
         self.spatial_lr_scale = model_args["spatial_lr_scale"]
 
         self.m = model_args["m"]
@@ -182,6 +258,11 @@ class GaussianModel:
         self._opacity_seg = model_args.get("_opacity_seg", torch.empty(0, device=dev))
         self._features_dc_seg = model_args.get("_features_dc_seg", torch.empty(0, device=dev))
         self._features_rest_seg = model_args.get("_features_rest_seg", torch.empty(0, device=dev))
+        self.fisher_info_ema = model_args.get("fisher_info_ema", torch.empty(0, device=dev))
+        self.fisher_uncert_ema = model_args.get("fisher_uncert_ema", torch.empty(0, device=dev))
+        self.fisher_low_info_counter = model_args.get("fisher_low_info_counter", torch.empty(0, device=dev, dtype=torch.long))
+        self.fisher_state_updates = model_args.get("fisher_state_updates", 0)
+        self._ensure_fisher_buffers()
 
         opt_state = model_args.get("optimizer_state", None)
 
@@ -380,6 +461,7 @@ class GaussianModel:
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.m_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.m_denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self._ensure_fisher_buffers()
 
 
         if self.has_seg_head():
@@ -600,6 +682,7 @@ class GaussianModel:
         self._opacity_seg = torch.empty(0, device="cuda")
         self._features_dc_seg = torch.empty(0, device="cuda")
         self._features_rest_seg = torch.empty(0, device="cuda")
+        self._ensure_fisher_buffers()
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
@@ -696,6 +779,10 @@ class GaussianModel:
         self.denom = self.denom[valid_points_mask]
         self.m_denom = self.m_denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
+        if self.fisher_info_ema.numel() == valid_points_mask.shape[0]:
+            self.fisher_info_ema = self.fisher_info_ema[valid_points_mask]
+            self.fisher_uncert_ema = self.fisher_uncert_ema[valid_points_mask]
+            self.fisher_low_info_counter = self.fisher_low_info_counter[valid_points_mask]
 
 
     def cat_tensors_to_optimizer(self, tensors_dict):
@@ -810,8 +897,70 @@ class GaussianModel:
         self.m_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.m_denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+        num_new = new_xyz.shape[0]
+        total_points = self.get_xyz.shape[0]
+        previous_points = total_points - num_new
+        if self.fisher_info_ema.numel() == previous_points and num_new > 0:
+            self.fisher_info_ema = torch.cat((self.fisher_info_ema, torch.zeros(num_new, device="cuda")), dim=0)
+            self.fisher_uncert_ema = torch.cat((self.fisher_uncert_ema, torch.ones(num_new, device="cuda")), dim=0)
+            self.fisher_low_info_counter = torch.cat(
+                (self.fisher_low_info_counter, torch.zeros(num_new, device="cuda", dtype=torch.long)),
+                dim=0,
+            )
+        elif self.fisher_info_ema.numel() != total_points:
+            self.fisher_info_ema = torch.zeros(total_points, device="cuda")
+            self.fisher_uncert_ema = torch.ones(total_points, device="cuda")
+            self.fisher_low_info_counter = torch.zeros(total_points, device="cuda", dtype=torch.long)
 
-    def densify_and_split(self, grads, grads_m, grad_threshold, scene_extent, N=2):
+    def _apply_fisher_candidate_filter(self, selected_pts_mask, fisher_cfg):
+        if not fisher_cfg or not fisher_cfg.get("enabled", False) or not self.has_fisher_state():
+            return selected_pts_mask
+
+        selected_idx = torch.nonzero(selected_pts_mask, as_tuple=False).squeeze(-1)
+        if selected_idx.numel() <= 1:
+            return selected_pts_mask
+
+        keep_fraction = float(fisher_cfg.get("keep_fraction", 1.0))
+        if keep_fraction >= 1.0:
+            return selected_pts_mask
+        if keep_fraction <= 0.0:
+            keep_fraction = 1.0 / float(selected_idx.numel())
+
+        keep_count = max(1, int(np.ceil(selected_idx.numel() * keep_fraction)))
+        uncertainties = self.fisher_uncert_ema[selected_idx]
+        topk_idx = torch.topk(uncertainties, k=keep_count, largest=True).indices
+        filtered = torch.zeros_like(selected_pts_mask)
+        filtered[selected_idx[topk_idx]] = True
+        return filtered
+
+    def _build_fisher_prune_mask(self, fisher_cfg):
+        if not fisher_cfg or not fisher_cfg.get("enabled", False) or not self.has_fisher_state():
+            return torch.zeros(self.get_xyz.shape[0], device="cuda", dtype=torch.bool)
+
+        info = self.fisher_info_ema
+        finite_mask = torch.isfinite(info)
+        if not finite_mask.any():
+            return torch.zeros_like(info, dtype=torch.bool)
+
+        prune_quantile = float(fisher_cfg.get("prune_quantile", 0.1))
+        prune_quantile = min(max(prune_quantile, 0.0), 1.0)
+        info_threshold = torch.quantile(info[finite_mask], prune_quantile)
+
+        low_info = info <= info_threshold
+        low_opacity = self.get_opacity_head("img").squeeze() < float(fisher_cfg.get("prune_opacity", 0.05))
+        if self.has_seg_head():
+            low_opacity = torch.logical_and(
+                low_opacity,
+                self.get_opacity_head("seg").squeeze() < float(fisher_cfg.get("prune_opacity", 0.05)),
+            )
+
+        low_info_mask = torch.logical_and(low_info, low_opacity)
+        self.fisher_low_info_counter[low_info_mask] += 1
+        self.fisher_low_info_counter[~low_info_mask] = 0
+
+        return self.fisher_low_info_counter >= int(fisher_cfg.get("prune_patience", 3))
+
+    def densify_and_split(self, grads, grads_m, grad_threshold, scene_extent, N=2, fisher_cfg=None):
         n_init_points = self.get_xyz.shape[0]
 
         # Extract points that satisfy the gradient condition
@@ -834,6 +983,10 @@ class GaussianModel:
         selected_pts_mask_m = torch.logical_and(selected_pts_mask_m, selected_pts_mask_scale)
 
         selected_pts_mask = torch.logical_or(selected_pts_mask, selected_pts_mask_m)
+        selected_pts_mask = self._apply_fisher_candidate_filter(selected_pts_mask, fisher_cfg)
+
+        if not selected_pts_mask.any():
+            return
 
         stds = self.get_scaling[selected_pts_mask].repeat(N, 1)
         means = torch.zeros((stds.size(0), 3), device="cuda")
@@ -887,7 +1040,7 @@ class GaussianModel:
         self.prune_points(prune_filter)
 
 
-    def densify_and_clone(self, grads, grads_m, grad_threshold, scene_extent):
+    def densify_and_clone(self, grads, grads_m, grad_threshold, scene_extent, fisher_cfg=None):
         # Extract points that satisfy the gradient condition
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
         selected_pts_mask = torch.logical_and(
@@ -900,6 +1053,10 @@ class GaussianModel:
         selected_pts_mask_m = torch.logical_and(selected_pts_mask_m, selected_pts_mask_scalem)
 
         selected_pts_mask = torch.logical_or(selected_pts_mask, selected_pts_mask_m)
+        selected_pts_mask = self._apply_fisher_candidate_filter(selected_pts_mask, fisher_cfg)
+
+        if not selected_pts_mask.any():
+            return
 
         new_xyz = self._xyz[selected_pts_mask]
         new_features_dc = self._features_dc[selected_pts_mask]
@@ -936,15 +1093,15 @@ class GaussianModel:
         )
 
 
-    def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size):
+    def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, fisher_cfg=None):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
 
         grads_m = self.m_gradient_accum / self.m_denom
         grads_m[grads_m.isnan()] = 0.0
 
-        self.densify_and_clone(grads, grads_m, max_grad, extent)
-        self.densify_and_split(grads, grads_m, max_grad, extent)
+        self.densify_and_clone(grads, grads_m, max_grad, extent, fisher_cfg=fisher_cfg)
+        self.densify_and_split(grads, grads_m, max_grad, extent, fisher_cfg=fisher_cfg)
 
         prune_mask_img = (self.get_opacity_head("img") < min_opacity).squeeze()
 
@@ -958,6 +1115,9 @@ class GaussianModel:
             big_points_vs = self.max_radii2D > max_screen_size
             big_points_ws = self.get_scaling.max(dim=1).values > 0.1 * 1.1
             prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
+
+        if fisher_cfg and fisher_cfg.get("enabled", False):
+            prune_mask = torch.logical_or(prune_mask, self._build_fisher_prune_mask(fisher_cfg))
 
         self.prune_points(prune_mask)
         torch.cuda.empty_cache()
@@ -973,5 +1133,3 @@ class GaussianModel:
         self.denom[update_filter_batch] += 1
         self.m_gradient_accum[update_filter_batch] += self.m.grad[update_filter_batch, :1].abs()
         self.m_denom[update_filter_batch] += 1
-
-
