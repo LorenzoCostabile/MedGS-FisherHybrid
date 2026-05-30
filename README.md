@@ -146,7 +146,7 @@ Ambas raíces deben tener:
 
 ### Preparación automática desde `images/` y `masks/`
 
-Si se quiere usar los datos contenidos en el zip de MedGS data que tienen esta estructura:
+Si se quiere usar los datos contenidos en el zip de MedGS data ([Descargar medgs_data.zip](https://github.com/LorenzoCostabile/MedGS-FisherHybrid/releases/download/1.0/medgs_data.zip)) que tienen esta estructura:
 
 ```text
 014_P3_1_right/
