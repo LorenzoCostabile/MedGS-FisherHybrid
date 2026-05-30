@@ -56,6 +56,14 @@ class ModelParams(ParamGroup):
         self.train_test_exp = False
         self.data_device = "cuda"
         self.eval = False
+        self.holdout_stride = 0
+        self.holdout_offset = 0
+        self.second_holdout_offset = -1
+        self.test_split = "primary"
+        self.train_pool_stride = 1
+        self.train_pool_offset = 0
+        self.gap_start_frac = -1.0
+        self.gap_end_frac = -1.0
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -98,6 +106,15 @@ class OptimizationParams(ParamGroup):
         self.depth_l1_weight_final = 0.01
         self.random_background = False
         self.optimizer_type = "default"
+        self.density_mode = "heuristic"
+        self.fisher_views_per_update = 4
+        self.fisher_ema_decay = 0.8
+        self.fisher_weight_xyz = 0.5
+        self.fisher_weight_deform = 0.5
+        self.fisher_keep_quantile = 0.5
+        self.fisher_prune_quantile = 0.1
+        self.fisher_prune_opacity = 0.05
+        self.fisher_prune_patience = 3
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

@@ -45,11 +45,35 @@ class Scene:
 
         if args.camera == "mirror":
             scene_info = sceneLoadTypeCallbacks["Mirror"](
-                args.source_path, args.white_background, args.eval, args.distance, args.num_pts
+                args.source_path,
+                args.white_background,
+                args.eval,
+                args.distance,
+                args.num_pts,
+                holdout_stride=getattr(args, "holdout_stride", 0),
+                holdout_offset=getattr(args, "holdout_offset", 0),
+                second_holdout_offset=getattr(args, "second_holdout_offset", -1),
+                test_split=getattr(args, "test_split", "primary"),
+                train_pool_stride=getattr(args, "train_pool_stride", 1),
+                train_pool_offset=getattr(args, "train_pool_offset", 0),
+                gap_start_frac=getattr(args, "gap_start_frac", -1.0),
+                gap_end_frac=getattr(args, "gap_end_frac", -1.0),
             )
         elif args.camera == "one":
             scene_info = sceneLoadTypeCallbacks["Image"](
-                args.source_path, args.white_background, args.eval, args.distance, args.num_pts
+                args.source_path,
+                args.white_background,
+                args.eval,
+                args.distance,
+                args.num_pts,
+                holdout_stride=getattr(args, "holdout_stride", 0),
+                holdout_offset=getattr(args, "holdout_offset", 0),
+                second_holdout_offset=getattr(args, "second_holdout_offset", -1),
+                test_split=getattr(args, "test_split", "primary"),
+                train_pool_stride=getattr(args, "train_pool_stride", 1),
+                train_pool_offset=getattr(args, "train_pool_offset", 0),
+                gap_start_frac=getattr(args, "gap_start_frac", -1.0),
+                gap_end_frac=getattr(args, "gap_end_frac", -1.0),
             )
         else:
             if os.path.exists(os.path.join(args.source_path, "sparse")):
