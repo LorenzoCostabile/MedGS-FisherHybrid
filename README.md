@@ -1,19 +1,19 @@
 # Fisher-Hybrid
 
-`Fisher-Hybrid` is a MedGS-based implementation of Fisher-guided density control for medical Gaussian Splatting.
+`Fisher-Hybrid` es una extensión de `MedGS` para control de densidad guiado por incertidumbre de Fisher en reconstrucción médica con Gaussian Splatting.
 
-The repository keeps the MedGS training and rendering pipeline, but extends the density-control stage with:
+La idea principal es mantener el pipeline de entrenamiento y renderizado de MedGS, pero modificar la fase de densificación y poda:
 
-- held-out frame splits for `train`, `fisher-val`, `test`, and `gap`
-- a Fisher-style uncertainty proxy computed from image and segmentation losses
-- Fisher-guided filtering of densification candidates
-- conservative Fisher-guided pruning
+- se definen particiones de frames para `train`, `fisher-val`, `test` y `gap`
+- se calcula un proxy de incertidumbre tipo Fisher a partir de pérdidas de imagen y segmentación
+- esa señal se usa para filtrar candidatos de densificación
+- y para introducir una poda conservadora guiada por incertidumbre
 
-This repository is the code package used to reproduce the experiments described in the accompanying report.
+Este repositorio corresponde al código de entrega para reproducir los experimentos principales del trabajo.
 
-## What Is Implemented
+## Qué Implementa Este Repositorio
 
-The main method-specific files are:
+Los archivos del método que realmente contienen la modificación sobre MedGS son:
 
 - `train.py`
 - `utils/fisher_utils.py`
@@ -23,95 +23,99 @@ The main method-specific files are:
 - `models/scenes/dataset_readers.py`
 - `gaussian_renderer/__init__.py`
 
-The relevant training modes are:
+Los modos de densidad relevantes son:
 
 - `--density_mode heuristic`
 - `--density_mode fisher_hybrid`
 
-The split-related arguments used in the experiments are:
+Los argumentos principales de partición son:
 
 - `--holdout_stride`
 - `--holdout_offset`
 - `--second_holdout_offset`
 - `--test_split`
+- `--train_pool_stride`
 - `--gap_start_frac`
 - `--gap_end_frac`
 
-## Recommended Workflow
+## Flujo Recomendado
 
-The recommended way to run the repository is with Docker Compose.
+La forma recomendada de usar el repositorio es mediante `Docker Compose`.
 
-The provided `docker-compose.yml` mounts the repository into the container:
+El `docker-compose.yml` monta el repositorio dentro del contenedor:
 
 ```yaml
 volumes:
   - .:/workspace
 ```
 
-This means:
+Eso significa:
 
-- the image provides the CUDA/PyTorch environment and compiled extensions
-- the code is taken from the current working tree through `/workspace`
-- host-side edits are visible immediately inside the container
-- rebuilding is only required when dependencies, compiled submodules, or the `Dockerfile` change
+- la imagen aporta el entorno CUDA/PyTorch y las extensiones compiladas
+- el código se toma del árbol actual del repositorio mediante `/workspace`
+- los cambios hechos en el host se ven inmediatamente dentro del contenedor
+- solo hace falta reconstruir la imagen si cambias dependencias, submódulos compilados o el `Dockerfile`
 
-## Requirements
+## Requisitos
 
-- NVIDIA GPU
-- NVIDIA driver + NVIDIA Container Toolkit
+- GPU NVIDIA
+- driver NVIDIA + NVIDIA Container Toolkit
 - Docker + Docker Compose
 
-## Clone And Submodules
+## Clonado y Submódulos
 
-If you want to rebuild the image locally, clone with submodules:
+Si vas a reconstruir la imagen localmente, clona el repositorio con submódulos:
 
 ```bash
 git clone --recurse-submodules <repo_url>
 cd Fisher-Hybrid
 ```
 
-If the repository was already cloned without submodules:
+Si ya lo habías clonado sin submódulos:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-The build depends on:
+La reconstrucción depende de:
 
 - `submodules/diff-gaussian-rasterization`
 - `submodules/simple-knn`
 
-## Docker Usage
+## Uso con Docker
 
-### Option 1: Use a prebuilt image
+### Opción 1: usar una imagen preconstruida
 
-If a prebuilt image has been published to Docker Hub, pull it and run without rebuilding:
+Si ya existe una imagen publicada en Docker Hub:
 
 ```bash
 docker pull storiano/fisher-hybrid:cuda12.4
 docker compose run --rm --no-build medgs bash
 ```
 
-If needed, set the image name in `docker-compose.yml` to the published tag.
+En este caso:
 
-### Option 2: Build locally
+- la imagen aporta el entorno
+- el repositorio montado por volumen aporta el código
+
+### Opción 2: construir localmente
 
 ```bash
 docker compose build medgs
 docker compose run --rm medgs bash
 ```
 
-## Data Package
+## Paquete de Datos
 
-The reproduction package is expected to include a ZIP file with the already prepared frame folders.
+La entrega asume que los datos se proporcionan en un ZIP con los frames ya preparados en formato MedGS.
 
-Example:
+Ejemplo:
 
 ```bash
 unzip fisher_hybrid_data.zip
 ```
 
-After extraction, the repository should contain data roots such as:
+Después de extraerlo, deberían existir raíces como estas:
 
 ```text
 data/
@@ -129,33 +133,33 @@ data/
     └── mirror/
 ```
 
-In joint training:
+En entrenamiento conjunto:
 
-- `-s` points to the image root
-- `--seg_source_path` points to the segmentation root
+- `-s` apunta a la raíz de imagen
+- `--seg_source_path` apunta a la raíz de segmentación
 
-Both roots must have:
+Ambas raíces deben tener:
 
-- the same number of frames
-- the same indexing
-- matching `original/` and `mirror/` folders
+- el mismo número de frames
+- el mismo indexado
+- carpetas `original/` y `mirror/` compatibles
 
-## Split Protocols
+## Protocolos de Split
 
-### Same-budget
+### 1. Same-budget
 
-This protocol is used to compare:
+Este protocolo se usa para comparar:
 
 - `baseline same-budget`
 - `fisher same-budget`
 
-Interpretation:
+Interpretación:
 
-- `train`: frames used by the main reconstruction loss
-- `fisher-val`: held-out frames used only to compute the Fisher proxy and guide density control
-- `untouched test`: held-out frames reserved for final evaluation
+- `train`: frames usados por la pérdida principal de reconstrucción
+- `fisher-val`: frames reservados para calcular el proxy Fisher y guiar densificación/poda
+- `untouched test`: frames reservados exclusivamente para evaluación final
 
-Reference configuration:
+Configuración de referencia:
 
 ```text
 --holdout_stride 8
@@ -164,22 +168,22 @@ Reference configuration:
 --test_split primary
 ```
 
-This means:
+Eso significa:
 
-- frames with `idx % 8 == 0` become `fisher-val`
-- frames with `idx % 8 == 4` become untouched final test
-- all other frames are used by the main reconstruction loss
+- los frames con `idx % 8 == 0` pasan a `fisher-val`
+- los frames con `idx % 8 == 4` pasan al test final intocable
+- el resto se usa en la pérdida principal
 
-### Full-budget
+### 2. Full-budget
 
-This protocol is used for the strongest heuristic baseline.
+Este protocolo se usa para el baseline heurístico más fuerte.
 
-Interpretation:
+Interpretación:
 
-- all non-test frames are used for training
-- there is no separate `fisher-val` subset
+- todos los frames no test se usan para entrenar
+- no existe un subconjunto separado `fisher-val`
 
-Reference configuration:
+Configuración de referencia:
 
 ```text
 --holdout_stride 8
@@ -188,18 +192,18 @@ Reference configuration:
 --test_split primary
 ```
 
-This means:
+Eso significa:
 
-- frames with `idx % 8 == 4` are kept as untouched final test
-- all remaining frames are used for training
+- los frames con `idx % 8 == 4` quedan reservados para test final
+- todos los demás se usan para entrenamiento
 
-## Reference Training Runs
+## Entrenamientos de Referencia
 
-The three main runs used in the report are listed below.
+Estos son los tres entrenamientos principales usados en el trabajo.
 
 ### 1. Baseline full-budget
 
-This is the strongest heuristic baseline.
+Es el baseline heurístico más fuerte.
 
 ```bash
 docker compose run --rm --no-build medgs \
@@ -221,7 +225,7 @@ docker compose run --rm --no-build medgs \
 
 ### 2. Baseline same-budget
 
-This baseline uses the same main reconstruction subset as Fisher, but does not use `fisher-val`.
+Usa el mismo subconjunto principal de reconstrucción que Fisher, pero no usa `fisher-val`.
 
 ```bash
 docker compose run --rm --no-build medgs \
@@ -243,7 +247,7 @@ docker compose run --rm --no-build medgs \
 
 ### 3. Fisher same-budget
 
-This is the proposed Fisher-guided density-control variant.
+Es la variante propuesta con control de densidad guiado por Fisher.
 
 ```bash
 docker compose run --rm --no-build medgs \
@@ -271,15 +275,113 @@ docker compose run --rm --no-build medgs \
   --test_iterations 5000 10000 15000 20000 25000 30000
 ```
 
-## General Training Syntax
+## Experimento Sparse
 
-The training script still supports the MedGS pipelines:
+El experimento `sparse` reduce el subconjunto principal de entrenamiento manteniendo fijo el mismo `fisher-val` y el mismo `test`.
+
+Regímenes:
+
+- `dense`: `train_pool_stride=1`
+- `x2`: `train_pool_stride=2`
+- `x4`: `train_pool_stride=4`
+
+He dejado un script para lanzar las variantes principales:
+
+- `scripts/run_experiment_sparse.sh`
+
+Uso:
+
+```bash
+bash scripts/run_experiment_sparse.sh
+```
+
+Opcionalmente puedes sobreescribir variables:
+
+```bash
+CASE_NAME=014_P3_1_right ITERATIONS=30000 bash scripts/run_experiment_sparse.sh
+```
+
+## Experimento de Bloque Continuo Oculto
+
+El experimento `contiguous gap` elimina un bloque continuo del barrido y evalúa la reconstrucción dentro de esa región no observada.
+
+Parámetros de referencia:
+
+- `gap_start_frac=0.4`
+- `gap_end_frac=0.6`
+
+He dejado un script para lanzar este experimento:
+
+- `scripts/run_experiment_gap.sh`
+
+Uso:
+
+```bash
+bash scripts/run_experiment_gap.sh
+```
+
+También puedes ajustar el tamaño del hueco:
+
+```bash
+CASE_NAME=014_P3_1_right GAP_START_FRAC=0.4 GAP_END_FRAC=0.6 bash scripts/run_experiment_gap.sh
+```
+
+## Visualización de Resultados
+
+He añadido un script para renderizar un modelo entrenado y generar vídeos de imagen y máscara:
+
+- `scripts/visualize_result.sh`
+
+Ejemplo sobre el `baseline full-budget`:
+
+```bash
+bash scripts/visualize_result.sh \
+  output/expH_014_P3_1_right_baseline_full \
+  data/real_014_P3_1_right_img \
+  30000 \
+  primary \
+  8 4 -1
+```
+
+Ejemplo sobre `fisher same-budget` evaluado en el test intocable:
+
+```bash
+bash scripts/visualize_result.sh \
+  output/expA_014_P3_1_right_fisher \
+  data/real_014_P3_1_right_img \
+  30000 \
+  secondary \
+  8 0 4
+```
+
+Ejemplo sobre el experimento de `gap`:
+
+```bash
+GAP_START_FRAC=0.4 GAP_END_FRAC=0.6 \
+bash scripts/visualize_result.sh \
+  output/expC_014_P3_1_right_gap20_fisher \
+  data/real_014_P3_1_right_img \
+  30000 \
+  gap \
+  8 0 -1
+```
+
+El script genera:
+
+- `render_img/`
+- `render_mask/`
+- `render_img.mp4`
+- `render_mask.mp4`
+
+## Entrenamiento General
+
+El script principal sigue soportando los pipelines de MedGS:
 
 - `img`
 - `seg`
 - `joint`
 
-Typical joint training:
+Entrenamiento conjunto típico:
 
 ```bash
 python -u train.py \
@@ -289,26 +391,26 @@ python -u train.py \
   --seg_source_path <seg_dataset_dir>
 ```
 
-## Rendering
+## Renderizado
 
-Render a trained model with:
+Renderizado manual:
 
 ```bash
 python render.py --model_path <model_dir> --pipeline both
 ```
 
-Useful options:
+Opciones útiles:
 
 - `--iteration <int>`
 - `--pipeline {img,seg,both}`
 - `--interp <int>`
 
-## Notes On Reproducibility
+## Notas de Reproducibilidad
 
-- If you use a prebuilt image plus the mounted repository, the image provides the environment and `/workspace` provides the code.
-- If you rebuild locally, make sure the submodules are initialized first.
-- The `same-budget` protocol should not be interpreted as a full-information baseline: the Fisher variant uses `fisher-val` to guide density control, while the heuristic baseline ignores that subset.
+- Si usas imagen preconstruida + volumen montado, la imagen aporta el entorno y `/workspace` aporta el código.
+- Si reconstruyes localmente, asegúrate de inicializar submódulos antes.
+- El protocolo `same-budget` no debe interpretarse como un baseline de información completa: la variante Fisher aprovecha `fisher-val` para guiar el control de densidad, mientras que el baseline heurístico ignora ese subconjunto.
 
-## License And Upstream
+## Licencia y Base del Proyecto
 
-This repository is based on MedGS and retains the original upstream license and code structure where applicable. `Fisher-Hybrid` only adds the Fisher-guided density-control extensions on top of that base.
+Este repositorio está basado en MedGS y conserva la estructura y licencia del código base donde corresponde. `Fisher-Hybrid` añade sobre esa base el control de densidad guiado por Fisher.
