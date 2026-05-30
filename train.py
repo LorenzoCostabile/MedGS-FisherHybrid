@@ -26,6 +26,7 @@ from models import (
 
 from utils.general_utils import safe_state
 from utils.loss_utils import penalize_outside_range
+from utils.fisher_utils import compute_joint_fisher_proxy
 import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
@@ -53,6 +54,20 @@ def norm_gauss(m, sigma, t):
 def interpolate(A, B, alpha):
     I = (1 - alpha) * A + alpha * B
     return I
+
+
+def build_fisher_density_cfg(opt):
+    if opt.density_mode == "heuristic":
+        return None
+    if opt.density_mode != "fisher_hybrid":
+        raise ValueError(f"Unknown density_mode: {opt.density_mode}")
+    return {
+        "enabled": True,
+        "keep_fraction": opt.fisher_keep_quantile,
+        "prune_quantile": opt.fisher_prune_quantile,
+        "prune_opacity": opt.fisher_prune_opacity,
+        "prune_patience": opt.fisher_prune_patience,
+    }
 
 def training(gs_type, dataset: ModelParams, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint,
              debug_from, save_xyz, use_dff):
@@ -614,8 +629,19 @@ def training_joint(
 
     cams_img = scene_img.getTrainCameras()
     cams_seg = scene_seg.getTrainCameras()
+    test_cams_img = scene_img.getTestCameras()
+    test_cams_seg = scene_seg.getTestCameras()
     assert len(cams_img) == len(cams_seg), "Camera lists must match between datasets"
+    assert len(test_cams_img) == len(test_cams_seg), "Held-out camera lists must match between datasets"
     num_frames = len(cams_img)
+    fisher_density_cfg = build_fisher_density_cfg(opt)
+
+    if fisher_density_cfg is not None:
+        if dataset_img.holdout_stride <= 0:
+            raise ValueError("fisher_hybrid requires --holdout_stride > 0 so Fisher is computed on held-out frames.")
+        if len(test_cams_img) == 0 or len(test_cams_seg) == 0:
+            raise RuntimeError("fisher_hybrid requires non-empty held-out test cameras for both image and mask.")
+        print(f"Fisher hybrid enabled: train_frames={len(cams_img)} heldout_frames={len(test_cams_img)}")
 
 
     gts_img = [cam.get_image(bg, opt.random_background).cuda() for cam in cams_img]
@@ -852,7 +878,39 @@ def training_joint(
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, 0.01, scene_img.cameras_extent, size_threshold)
+                    if fisher_density_cfg is not None:
+                        with torch.enable_grad():
+                            fisher_proxy = compute_joint_fisher_proxy(
+                                gaussians,
+                                test_cams_img,
+                                test_cams_seg,
+                                pipe,
+                                bg,
+                                opt.random_background,
+                                opt.fisher_views_per_update,
+                                lambda_img,
+                                lambda_seg,
+                            )
+                        fisher_stats = gaussians.update_fisher_state(
+                            fisher_proxy["xyz"],
+                            fisher_proxy["deform"],
+                            opt.fisher_ema_decay,
+                            opt.fisher_weight_xyz,
+                            opt.fisher_weight_deform,
+                        )
+                        print(
+                            f"\n[ITER {iteration}] Fisher update "
+                            f"(views={len(fisher_proxy['sampled_indices'])}, "
+                            f"info_mean={fisher_stats['info_mean']:.4f}, "
+                            f"uncert_mean={fisher_stats['uncert_mean']:.4f})"
+                        )
+                    gaussians.densify_and_prune(
+                        opt.densify_grad_threshold,
+                        0.01,
+                        scene_img.cameras_extent,
+                        size_threshold,
+                        fisher_cfg=fisher_density_cfg,
+                    )
 
                 if iteration % opt.opacity_reset_interval == 0 or (
                     dataset_img.white_background and iteration == opt.densify_from_iter
@@ -1014,6 +1072,11 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
+
+    if args.density_mode not in {"heuristic", "fisher_hybrid"}:
+        raise ValueError("--density_mode must be either 'heuristic' or 'fisher_hybrid'")
+    if args.density_mode == "fisher_hybrid" and args.pipeline != "joint":
+        raise NotImplementedError("fisher_hybrid is currently implemented only for --pipeline joint")
 
     if args.pipeline == "joint":
         if args.seg_source_path is None:
